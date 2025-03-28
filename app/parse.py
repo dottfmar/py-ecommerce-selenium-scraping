@@ -9,6 +9,7 @@ from selenium.common import (
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup, Tag
+from selenium.webdriver.ie.webdriver import WebDriver
 
 BASE_URL = "https://webscraper.io/"
 HOME_URL = urljoin(BASE_URL, "test-sites/e-commerce/more/")
@@ -18,7 +19,7 @@ LAPTOPS_URL = urljoin(BASE_URL, "test-sites/e-commerce/more/computers/laptops")
 TABLETS_URL = urljoin(BASE_URL, "test-sites/e-commerce/more/computers/tablets")
 TOUCHES_URL = urljoin(BASE_URL, "test-sites/e-commerce/more/phones/touch")
 
-LINKS_F_NAME = {
+LINKS_MAPPING_TO_FILES = {
     HOME_URL: "home",
     COMPUTERS_URL: "computers",
     PHONES_URL: "phones",
@@ -49,12 +50,22 @@ def reviews_from_row(row: str) -> int:
 
 
 def parse_single_card(card: Tag) -> Product:
-    title = clean_text(card.select(".title")[0]["title"])
-    description = clean_text(str(card.select(".description")[0].contents[0]))
-    price = float(str(card.select(".price")[0].contents[0]).replace("$", ""))
-    review = card.select(".review-count")[0]
+    title = clean_text(
+        card.find_element(By.CSS_SELECTOR, ".title")
+        .get_attribute("title")
+    )
+    description = clean_text(
+        card.find_element(By.CSS_SELECTOR, ".description")
+        .text
+    )
+    price = float(
+        card.find_element(By.CSS_SELECTOR, ".price")
+        .text
+        .replace("$", "")
+    )
+    review = card.find_element(By.CSS_SELECTOR, ".review-count")
     r_count = reviews_from_row(review.text)
-    r_rating = len(card.select(".ws-icon-star"))
+    r_rating = len(card.find_elements(By.CSS_SELECTOR, ".ws-icon-star"))
 
     return Product(
         title=title,
@@ -75,12 +86,12 @@ def get_soup_page_with_more_button(page_link: str) -> BeautifulSoup:
     browser.get(page_link)
 
     if browser.find_elements(By.CSS_SELECTOR, ".acceptCookies"):
-        browser.find_elements(By.CSS_SELECTOR, ".acceptCookies")[0].click()
+        browser.find_element(By.CSS_SELECTOR, ".acceptCookies").click()
+
     while True:
         try:
-            more_button = browser.find_elements(
-                By.CSS_SELECTOR,
-                ".ecomerce-items-scroll-more")[0]
+            more_button = browser.find_element(
+                By.CSS_SELECTOR, ".ecomerce-items-scroll-more")
             more_button.click()
         except (
             ElementNotInteractableException,
@@ -93,8 +104,8 @@ def get_soup_page_with_more_button(page_link: str) -> BeautifulSoup:
     return BeautifulSoup(page_html, "html.parser")
 
 
-def get_cards(soup_page: BeautifulSoup) -> list[Tag]:
-    return soup_page.select(".card")
+def get_cards(driver: WebDriver) -> list:
+    return driver.find_elements(By.CSS_SELECTOR, ".card")
 
 
 def write_to_csv(products: list[Product], name: str) -> None:
@@ -106,16 +117,33 @@ def write_to_csv(products: list[Product], name: str) -> None:
 
 
 def get_all_products() -> None:
-    for page_link, f_name in LINKS_F_NAME.items():
-        bs_page = get_soup_page_by_url(page_link)
+    for page_link, f_name in LINKS_MAPPING_TO_FILES.items():
+        browser = Chrome()
+        browser.get(page_link)
 
-        if bs_page.select(".ecomerce-items-scroll-more"):
-            bs_page = get_soup_page_with_more_button(page_link)
+        if browser.find_elements(By.CSS_SELECTOR, ".acceptCookies"):
+            browser.find_element(By.CSS_SELECTOR, ".acceptCookies").click()
 
-        cards = get_cards(bs_page)
+        if browser.find_elements(
+            By.CSS_SELECTOR,
+            ".ecomerce-items-scroll-more"
+        ):
+            while True:
+                try:
+                    more_button = browser.find_element(
+                        By.CSS_SELECTOR, ".ecomerce-items-scroll-more")
+                    more_button.click()
+                except (
+                    ElementNotInteractableException,
+                    ElementClickInterceptedException
+                ):
+                    break
+
+        cards = get_cards(browser)
         parsed_cards = [parse_single_card(card) for card in cards]
 
         write_to_csv(parsed_cards, f_name)
+        browser.quit()
 
 
 if __name__ == "__main__":
